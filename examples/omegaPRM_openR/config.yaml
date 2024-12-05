@@ -1,0 +1,18 @@
+input:
+  json_file_path: 'example_problems.json'
+
+output:
+  file_prefix: 'example'
+  log_file_path: 'example_processing.log'
+
+processing:
+  initial_rollouts: 20
+  num_rollouts: 20
+  max_iterations: 100
+
+model:
+  model_type: "camel"
+  model_name: "deepseek-chat"
+  model_args:
+    max_tokens: 200
+    temperature_range: [0.7, 1.0]
