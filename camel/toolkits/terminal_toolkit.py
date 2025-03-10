@@ -109,23 +109,13 @@ class TerminalToolkit(BaseToolkit):
 
         if not os.path.isdir(path):
             return f"The path provided is not a directory: {path}"
-
-        command = []
-        if self.os_type in ['Darwin', 'Linux']:  # macOS or Linux
-            command.extend(["find", path, "-name", glob])
-        else:  # Windows
-            # For Windows, we use dir command with /s for recursive search
-            # and /b for bare format
-
-            pattern = glob
-            command.extend(["dir", "/s", "/b", os.path.join(path, pattern)])
-
+        
         try:
-            result = subprocess.run(
-                command, check=False, capture_output=True, text=True
-            )
-            return result.stdout.strip()
-        except subprocess.SubprocessError as e:
+            files = glob.glob(os.path.join(path, "**", pattern), recursive=True)
+            print(f"files: {files}")
+            return "\n".join(files) if files else "No files found."
+        
+        except Exception as e:
             logger.error(f"Error finding files by name: {e}")
             return f"Error: {e!s}"
 
