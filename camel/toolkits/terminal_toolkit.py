@@ -15,6 +15,7 @@
 import os
 import platform
 import subprocess
+import glob
 from typing import Any, Dict, List, Optional
 
 from camel.logger import get_logger
@@ -53,26 +54,21 @@ class TerminalToolkit(BaseToolkit):
         self.os_type = (
             platform.system()
         )  # 'Windows', 'Darwin' (macOS), 'Linux'
+        
 
-    def file_find_in_content(
-        self, file: str, regex: str, sudo: bool = False
-    ) -> str:
+    def file_find_in_content(self, file: str, regex: str, sudo: bool = False) -> str:
         r"""Search for matching text within file content.
 
         Args:
             file (str): Absolute path of the file to search within.
             regex (str): Regular expression pattern to match.
-            sudo (bool, optional): Whether to use sudo privileges. Defaults to
-                False. Note: Using sudo requires the process to have
-                appropriate permissions.
+            sudo (bool, optional): Whether to use sudo privileges. Defaults to False.
 
         Returns:
             str: Matching content found in the file.
 
         Raises:
-            FileNotFoundError: If the specified file does not exist.
-            PermissionError: If there are insufficient permissions to read the
-                file.
+            PermissionError: If there are insufficient permissions to read the file.
         """
         if not os.path.exists(file):
             raise FileNotFoundError(f"File not found: {file}")
@@ -80,31 +76,35 @@ class TerminalToolkit(BaseToolkit):
         if not os.path.isfile(file):
             raise ValueError(f"The path provided is not a file: {file}")
 
-        command = []
-        if sudo:
-            command.extend(["sudo"])
+        if not os.access(file, os.R_OK):
+            raise PermissionError(f"Permission denied: {file}")
 
-        if self.os_type in ['Darwin', 'Linux']:  # macOS or Linux
+        command = []
+        if self.os_type in ["Darwin", "Linux"]:  # macOS or Linux
+            if sudo:
+                command.append("sudo")
             command.extend(["grep", "-E", regex, file])
         else:  # Windows
-            # For Windows, we could use PowerShell or findstr
-            command.extend(["findstr", "/R", regex, file])
+            # Use PowerShell for better regex support
+            command = [
+                "powershell", "-Command",
+                f"Select-String -Path '{file}' -Pattern '{regex}'"
+            ]
 
         try:
-            result = subprocess.run(
-                command, check=False, capture_output=True, text=True
-            )
-            return result.stdout.strip()
-        except subprocess.SubprocessError as e:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, shell=(self.os_type == "Windows"))
+            return result.stdout.strip() if result.stdout else "No matches found."
+        except subprocess.CalledProcessError as e:
             logger.error(f"Error searching in file content: {e}")
             return f"Error: {e!s}"
 
-    def file_find_by_name(self, path: str, glob: str) -> str:
-        r"""Find files by name pattern in specified directory.
+
+    def file_find_by_name(self, path: str, pattern: str) -> str:
+        r"""Find files by name pattern in specified directory recursively.
 
         Args:
-            path (str): Absolute path of directory to search.
-            glob (str): Filename pattern using glob syntax wildcards.
+            path (str): Path of directory to search.
+            pattern (str): Filename pattern using glob syntax wildcards.
 
         Returns:
             str: List of files matching the pattern.
@@ -113,29 +113,14 @@ class TerminalToolkit(BaseToolkit):
             FileNotFoundError: If the specified directory does not exist.
         """
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Directory not found: {path}")
+            return f"Directory not found: {path}"
 
         if not os.path.isdir(path):
-            raise ValueError(f"The path provided is not a directory: {path}")
+            return f"The path provided is not a directory: {path}"
+        
+        files = glob.glob(os.path.join(path, "**", pattern), recursive=True)
+        return "\n".join(files) if files else "No files found."
 
-        command = []
-        if self.os_type in ['Darwin', 'Linux']:  # macOS or Linux
-            command.extend(["find", path, "-name", glob])
-        else:  # Windows
-            # For Windows, we use dir command with /s for recursive search
-            # and /b for bare format
-            # Convert glob pattern to something Windows can understand
-            pattern = glob.replace("*", "*").replace("?", "?")
-            command.extend(["dir", "/s", "/b", os.path.join(path, pattern)])
-
-        try:
-            result = subprocess.run(
-                command, check=False, capture_output=True, text=True
-            )
-            return result.stdout.strip()
-        except subprocess.SubprocessError as e:
-            logger.error(f"Error finding files by name: {e}")
-            return f"Error: {e!s}"
 
     def shell_exec(self, id: str, exec_dir: str, command: str) -> str:
         r"""Execute commands in a specified shell session.
@@ -154,10 +139,10 @@ class TerminalToolkit(BaseToolkit):
                 exist.
         """
         if not os.path.isabs(exec_dir):
-            raise ValueError(f"exec_dir must be an absolute path: {exec_dir}")
+            return "Working directory must be an absolute path. Please provide the full path."
 
         if not os.path.exists(exec_dir):
-            raise FileNotFoundError(f"Directory not found: {exec_dir}")
+            return f"Directory not found: {exec_dir}"
 
         # If the session doesn't exist, create a new one
         if id not in self.shell_sessions:
@@ -208,6 +193,7 @@ class TerminalToolkit(BaseToolkit):
             self.shell_sessions[id]["output"] = error_msg
             logger.error(error_msg)
             return error_msg
+        
 
     def shell_view(self, id: str) -> str:
         r"""View the content of a specified shell session.
